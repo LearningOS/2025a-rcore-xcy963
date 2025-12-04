@@ -52,17 +52,19 @@ lazy_static! {
     pub static ref TASK_MANAGER: TaskManager = {
         let num_app = get_num_app();
         let mut tasks = [TaskControlBlock {
-            task_cx: TaskContext::zero_init(),
-            task_status: TaskStatus::UnInit,
+            task_cx: TaskContext::zero_init(),//上下文
+            task_status: TaskStatus::UnInit, //任务状态
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
             task.task_status = TaskStatus::Ready;
-        }
+        }//这个for是在初始化所有的任务
         TaskManager {
             num_app,
             inner: unsafe {
                 UPSafeCell::new(TaskManagerInner {
+                    //封装一下,因为这个全局变量是共享的,但是rust不允许共享的变量被编辑,
+                    //所以我们套一个,因为我们是单核cpu,不会有数据竞争,所以这个是安全的
                     tasks,
                     current_task: 0,
                 })

@@ -94,12 +94,13 @@ fn kernel_log_info() {
 
 #[no_mangle]
 /// the rust entry-point of os
+/// 如果网站上能带着我们过一遍全流程就好了
 pub fn rust_main() -> ! {
     clear_bss();
     kernel_log_info();
     heap_alloc::init_heap();
     trap::init();
-    loader::load_apps();
+    loader::load_apps();//只是把数据搬到
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
     task::run_first_task();

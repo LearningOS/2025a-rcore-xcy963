@@ -50,7 +50,7 @@ impl UserStack {
 
 /// Get base address of app i.
 fn get_base_i(app_id: usize) -> usize {
-    APP_BASE_ADDRESS + app_id * APP_SIZE_LIMIT
+    APP_BASE_ADDRESS + app_id * APP_SIZE_LIMIT//和之前在build.py里面传递的那个参数的算法要一致
 }
 
 /// Get the total number of applications.
@@ -66,10 +66,14 @@ pub fn get_num_app() -> usize {
 pub fn load_apps() {
     extern "C" {
         fn _num_app();
+        //在这里利用了函数的指针是全局唯一的这个特性,也就是定义一个rust变量也会被汇编里面定义的.global _num_app覆盖
+
     }
     let num_app_ptr = _num_app as usize as *const usize;
     let num_app = get_num_app();
     let app_start = unsafe { core::slice::from_raw_parts(num_app_ptr.add(1), num_app + 1) };
+    // 看汇编_num_app就是一个长度为12,里面元素是64位整数的数组(就是usize数组!!),里面由于还要记录结束的字符,app_start[i]表示第i个程序开始的地址
+    // app_start最后一位是最后一个应用程序9的结束地址,所以app_start长度比num_app多一个
     // load apps
     for i in 0..num_app {
         let base_i = get_base_i(i);
@@ -79,9 +83,11 @@ pub fn load_apps() {
         // load app from data section to memory
         let src = unsafe {
             core::slice::from_raw_parts(app_start[i] as *const u8, app_start[i + 1] - app_start[i])
+            //汇编里面定义了这个地址是要放用户代码的,论段来说这个内存是位于用户程序的.data段
+            //这个数组里面的元素是.data段里面的数据
         };
         let dst = unsafe { core::slice::from_raw_parts_mut(base_i as *mut u8, src.len()) };
-        dst.copy_from_slice(src);
+        dst.copy_from_slice(src);//copy到一个地址,地址是从上面算出来的,我设计过这个内存不会干涉其他的代码
     }
     // Memory fence about fetching the instruction memory
     // It is guaranteed that a subsequent instruction fetch must

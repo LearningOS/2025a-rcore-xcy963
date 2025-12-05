@@ -22,7 +22,7 @@ __switch:
         .set n, n + 1
     .endr
     # restore ra & s0~s11 of next execution
-    ld ra, 0(a1)
+    ld ra, 0(a1) #改ra了,所以ret会跳到对应任务去
     .set n, 0
     .rept 12
         LOAD_SN %n

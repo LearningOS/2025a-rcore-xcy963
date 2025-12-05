@@ -22,8 +22,8 @@ KERNEL_ENTRY_PA := 0x80200000
 # Binutils
 OBJDUMP := rust-objdump --arch-name=riscv64
 OBJCOPY := rust-objcopy --binary-architecture=riscv64
-
-CHAPTER ?= $(shell git rev-parse --abbrev-ref HEAD | sed -E 's/ch([0-9])/\1/')
+#$(shell git rev-parse --abbrev-ref HEAD | sed -E 's/ch([0-9])/\1/')
+CHAPTER ?= 2
 TEST ?= $(CHAPTER)
 BASE ?= 1
 

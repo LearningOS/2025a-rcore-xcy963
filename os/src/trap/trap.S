@@ -10,13 +10,18 @@
     .globl __restore
     .align 2
 __alltraps:
-    csrrw sp, sscratch, sp
+    #最终他也只是保存了用户模式的整数寄存器还有sstatus:
+    csrrw sp, sscratch, sp 
+    #这个汇编 1 2 3 执行后的结果是1上存2,2上面存3,所以就是交换sp和sscratch,让现在的栈指针是内核的栈
     # now sp->kernel stack, sscratch->user stack
     # allocate a TrapContext on kernel stack
     addi sp, sp, -34*8
+    #留出TrapContext的空间
     # save general-purpose registers
     sd x1, 1*8(sp)
+    #可以看出来是64位寄存器
     # skip sp(x2), we will save it later
+    #这个是因为现在的x2是内核的sp
     sd x3, 3*8(sp)
     # skip tp(x4), application does not use it
     # save x5~x31

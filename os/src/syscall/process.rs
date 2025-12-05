@@ -1,7 +1,9 @@
 //! Process management syscalls
 use crate::{
-    task::{exit_current_and_run_next, suspend_current_and_run_next},
+    // loader::{get_app_addr_range, get_user_stack_range},
+    task::{ exit_current_and_run_next, suspend_current_and_run_next},
     timer::get_time_us,
+    trace,
 };
 
 #[repr(C)]
@@ -38,8 +40,34 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     0
 }
 
-// TODO: implement the syscall
-pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
+//trace的系统调用的主函数
+pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
+    //默认是寄存器直接传进来,所以类型都是usize
     trace!("kernel: sys_trace");
-    -1
+    match trace_request {
+        0 => trace_read_byte(id)
+            .map(|value| value as isize)
+            .unwrap_or(-1),//如果读取的东西有问题,返回-1
+        1 => {
+            if trace_write_byte(id, data as u8) {
+                0
+            } else {
+                -1
+            }
+        }
+        2 => trace::current_task_syscall_count(id) as isize,
+        _ => -1,
+    }
+}
+
+
+fn trace_read_byte(addr: usize) -> Option<u8> {
+    //从id处读取一个字节的无符号整数指
+    Some(unsafe { core::ptr::read_volatile(addr as *const u8) })
+}
+
+fn trace_write_byte(addr: usize, data: u8) -> bool {
+
+    unsafe { core::ptr::write_volatile(addr as *mut u8, data) };
+    true
 }

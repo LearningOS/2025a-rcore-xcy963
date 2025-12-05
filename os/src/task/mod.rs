@@ -137,6 +137,11 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// 写一个函数,获取当前的id,配合获取调用次数
+    fn get_current_task_id(&self) -> usize {
+        self.inner.exclusive_access().current_task
+    }
 }
 
 /// Run the first task in task list.
@@ -148,6 +153,11 @@ pub fn run_first_task() {
 /// or there is no `Ready` task and we can exit with all applications completed
 fn run_next_task() {
     TASK_MANAGER.run_next_task();
+}
+
+/// 获取当前的id
+pub fn current_task_id() -> usize {
+    TASK_MANAGER.get_current_task_id()
 }
 
 /// Change the status of current `Running` task into `Ready`.

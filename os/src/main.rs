@@ -15,7 +15,7 @@
 //! We then call [`task::run_first_task()`] and for the first time go to
 //! userspace.
 
-#![deny(missing_docs)]
+#![deny(missing_docs)]//!这个东西会因为我没有写文档而把我的库给否定,好可怕
 #![deny(warnings)]
 #![no_std]
 #![no_main]
@@ -39,6 +39,7 @@ pub mod sync;
 pub mod syscall;
 pub mod task;
 pub mod timer;
+pub mod trace;
 pub mod trap;
 
 core::arch::global_asm!(include_str!("entry.asm"));
@@ -71,7 +72,7 @@ fn kernel_log_info() {
         fn boot_stack_top(); // stack top
     }
     logging::init();
-    println!("[kernel] Hello, world!");
+    println!("[kernel] Hello, world!");//TODO目前似乎还不知道这个日志机制,可能在以后的章节会说
     trace!(
         "[kernel] .text [{:#x}, {:#x})",
         stext as usize,
@@ -100,7 +101,7 @@ pub fn rust_main() -> ! {
     kernel_log_info();
     heap_alloc::init_heap();
     trap::init();
-    loader::load_apps();//只是把数据搬到
+    loader::load_apps(); //只是把数据搬到
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
     task::run_first_task();

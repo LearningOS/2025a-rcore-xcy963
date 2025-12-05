@@ -50,7 +50,7 @@ impl UserStack {
 
 /// Get base address of app i.
 fn get_base_i(app_id: usize) -> usize {
-    APP_BASE_ADDRESS + app_id * APP_SIZE_LIMIT//和之前在build.py里面传递的那个参数的算法要一致
+    APP_BASE_ADDRESS + app_id * APP_SIZE_LIMIT //和之前在build.py里面传递的那个参数的算法要一致
 }
 
 /// Get the total number of applications.
@@ -83,11 +83,11 @@ pub fn load_apps() {
         // load app from data section to memory
         let src = unsafe {
             core::slice::from_raw_parts(app_start[i] as *const u8, app_start[i + 1] - app_start[i])
-            //汇编里面定义了这个地址是要放用户代码的,论段来说这个内存是位于用户程序的.data段
+            //汇编里面定义了这个地址是要放用户代码的,论段来说这个内存是位于内核程序的.data段
             //这个数组里面的元素是.data段里面的数据
         };
         let dst = unsafe { core::slice::from_raw_parts_mut(base_i as *mut u8, src.len()) };
-        dst.copy_from_slice(src);//copy到一个地址,地址是从上面算出来的,我设计过这个内存不会干涉其他的代码
+        dst.copy_from_slice(src); //copy到一个地址,地址是从上面算出来的,我设计过这个内存不会干涉其他的代码
     }
     // Memory fence about fetching the instruction memory
     // It is guaranteed that a subsequent instruction fetch must

@@ -9,8 +9,8 @@
     .globl __switch
 __switch:
     # __switch(
-    #     current_task_cx_ptr: *mut TaskContext,
-    #     next_task_cx_ptr: *const TaskContext
+    #     current_task_cx_ptr: *mut TaskContext,//这个是内存的一个指针,放在a0里面
+    #     next_task_cx_ptr: *const TaskContext//这个是内存的一个指针,放在a0里面
     # )
     # save kernel stack of current task
     sd sp, 8(a0)

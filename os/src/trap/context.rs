@@ -12,7 +12,7 @@ pub struct TrapContext {
     /// Supervisor Exception Program Counter
     pub sepc: usize,
     /// Token of kernel address space
-    pub kernel_satp: usize,
+    pub kernel_satp: usize,//Supervisor Address Translation and Protection Register
     /// Kernel stack pointer of the current application
     pub kernel_sp: usize,
     /// Virtual address of trap handler entry point in kernel
@@ -26,13 +26,13 @@ impl TrapContext {
     }
     /// init the trap context of an application
     pub fn app_init_context(
-        entry: usize,
-        sp: usize,
-        kernel_satp: usize,
-        kernel_sp: usize,
-        trap_handler: usize,
+        entry: usize,//程序段入口地址,这个是一个虚拟地址,编写应用程序的人是知道的
+        sp: usize,//用户栈的虚拟地址
+        kernel_satp: usize,//内核的虚拟地址空间状态,也就是页表的树根地址
+        kernel_sp: usize,  //这个程序对应的内核栈的虚拟地址
+        trap_handler: usize,//TODOtrap回调函数的物理地址,这个传入的是在当前rust程序中的地址,应该是物理地址,那么为什么他可以在虚拟地址环境下正常工作?
     ) -> Self {
-        let mut sstatus = sstatus::read();
+        let mut sstatus = sstatus::read();//复制内核的sstatus,这个是描述trap的时候是用户态还是内核态的寄存器
         // set CPU privilege to User after trapping back
         sstatus.set_spp(SPP::User);
         let mut cx = Self {

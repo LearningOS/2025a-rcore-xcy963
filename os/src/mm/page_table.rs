@@ -74,7 +74,7 @@ impl PageTableEntry {
 
 /// page table structure
 pub struct PageTable {
-    root_ppn: PhysPageNum,
+    root_ppn: PhysPageNum,//一个usize的封装
     frames: Vec<FrameTracker>,
 }
 
@@ -116,6 +116,7 @@ impl PageTable {
         result
     }
     /// Find PageTableEntry by VirtPageNum
+    /// 这个是给那个不锁定资源的查找器看的
     fn find_pte(&self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
         let idxs = vpn.indexes();
         let mut ppn = self.root_ppn;

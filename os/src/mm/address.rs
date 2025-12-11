@@ -96,7 +96,7 @@ impl From<VirtPageNum> for usize {
 impl VirtAddr {
     /// Get the (floor) virtual page number
     pub fn floor(&self) -> VirtPageNum {
-        VirtPageNum(self.0 / PAGE_SIZE)
+        VirtPageNum(self.0 / PAGE_SIZE)//可以把他写成带余除法理解
     }
 
     /// Get the (ceil) virtual page number

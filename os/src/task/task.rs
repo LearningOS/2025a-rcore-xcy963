@@ -46,11 +46,11 @@ impl TaskControlBlock {
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
             .unwrap()
-            .ppn();
+            .ppn();//这个地方使用了一个约定,trap的代码一定是放在虚拟内存的最高位的,所以直接使用这个程序的页表映射最高位的虚拟地址就好
         let task_status = TaskStatus::Ready;
         // map a kernel-stack in kernel space
         let (kernel_stack_bottom, kernel_stack_top) = kernel_stack_position(app_id);
-        KERNEL_SPACE.exclusive_access().insert_framed_area(
+        KERNEL_SPACE.exclusive_access().insert_framed_area(//这一段是需要回收的,所以是framed
             kernel_stack_bottom.into(),
             kernel_stack_top.into(),
             MapPermission::R | MapPermission::W,
@@ -62,16 +62,17 @@ impl TaskControlBlock {
             trap_cx_ppn,
             base_size: user_sp,
             heap_bottom: user_sp,
-            program_brk: user_sp,
+            program_brk: user_sp,//现在的堆指针
         };
         // prepare TrapContext in user space
+        //认为应用刚刚初始化的时候是从trap过去的,走的是trap return的路
         let trap_cx = task_control_block.get_trap_cx();
         *trap_cx = TrapContext::app_init_context(
             entry_point,
             user_sp,
             KERNEL_SPACE.exclusive_access().token(),
             kernel_stack_top,
-            trap_handler as usize,
+            trap_handler as usize,//设置trap的回调函数
         );
         task_control_block
     }

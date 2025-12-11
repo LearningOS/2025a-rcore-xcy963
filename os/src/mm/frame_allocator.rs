@@ -11,7 +11,7 @@ use lazy_static::*;
 /// tracker for physical page frame allocation and deallocation
 pub struct FrameTracker {
     /// physical page number
-    pub ppn: PhysPageNum,
+    pub ppn: PhysPageNum,//也可能是下一级页表的物理地址
 }
 
 impl FrameTracker {

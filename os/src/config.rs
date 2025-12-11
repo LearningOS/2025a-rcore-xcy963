@@ -16,7 +16,10 @@ pub const PAGE_SIZE_BITS: usize = 0xc;
 /// the max number of syscall
 pub const MAX_SYSCALL_NUM: usize = 500;
 /// the virtual addr of trapoline
-pub const TRAMPOLINE: usize = usize::MAX - PAGE_SIZE + 1;
+/// 这个是0xffff_ffff_ffff_f000,如果把他理解成虚拟地址,我们来复习一下Sv39(低39位有效)
+/// 低地址区：[0x0000_0000_0000_0000, 0x0000_007f_ffff_ffff]
+/// 高地址区：[0xffff_ff80_0000_0000, 0xffff_ffff_ffff_ffff]
+pub const TRAMPOLINE: usize = usize::MAX - PAGE_SIZE + 1;//高地址最后一页
 /// the virtual addr of trap context
 pub const TRAP_CONTEXT_BASE: usize = TRAMPOLINE - PAGE_SIZE;
 /// clock frequency

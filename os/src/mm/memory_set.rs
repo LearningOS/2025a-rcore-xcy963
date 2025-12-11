@@ -30,13 +30,17 @@ extern "C" {
 
 lazy_static! {
     /// The kernel's initial memory mapping(kernel address space)
+    /// lazy_static只要理解成第一次访问的时候初始化就好了
     pub static ref KERNEL_SPACE: Arc<UPSafeCell<MemorySet>> =
         Arc::new(unsafe { UPSafeCell::new(MemorySet::new_kernel()) });
+    //复习下arc(引用计数指针),指向内核的引用计数.UPSafeCell是上一章也用的那个可变引用
 }
 /// address space
+/// 这个数据结构本身是可以没有的,但是为了后面的fork啥的方便还是需要写一个加速
+/// 先不用管他有什么用,先知道他的目的是存储每个程序段的页表
 pub struct MemorySet {
     page_table: PageTable,
-    areas: Vec<MapArea>,
+    areas: Vec<MapArea>,//用来分段
 }
 
 impl MemorySet {
@@ -71,10 +75,11 @@ impl MemorySet {
         self.areas.push(map_area);
     }
     /// Mention that trampoline is not collected by areas.
+    /// 把虚拟地址最高的那页映射为trap函数
     fn map_trampoline(&mut self) {
         self.page_table.map(
-            VirtAddr::from(TRAMPOLINE).into(),
-            PhysAddr::from(strampoline as usize).into(),
+            VirtAddr::from(TRAMPOLINE).into(),//虚拟地址是每个程序统一的最高位
+            PhysAddr::from(strampoline as usize).into(),//这个是物理地址,详细参考ld脚本
             PTEFlags::R | PTEFlags::X,
         );
     }
@@ -91,7 +96,7 @@ impl MemorySet {
             ".bss [{:#x}, {:#x})",
             sbss_with_stack as usize, ebss as usize
         );
-        info!("mapping .text section");
+        info!("mapping .text section");//这个地方全部都是恒等映射
         memory_set.push(
             MapArea::new(
                 (stext as usize).into(),
@@ -148,17 +153,18 @@ impl MemorySet {
     pub fn from_elf(elf_data: &[u8]) -> (Self, usize, usize) {
         let mut memory_set = Self::new_bare();
         // map trampoline
-        memory_set.map_trampoline();
+        memory_set.map_trampoline();//虚拟地址最高位是trap入口
         // map program headers of elf, with U flag
         let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
         let elf_header = elf.header;
         let magic = elf_header.pt1.magic;
-        assert_eq!(magic, [0x7f, 0x45, 0x4c, 0x46], "invalid elf!");
+        assert_eq!(magic, [0x7f, 0x45, 0x4c, 0x46], "invalid elf!");//这个是内核级别直接报错
         let ph_count = elf_header.pt2.ph_count();
         let mut max_end_vpn = VirtPageNum(0);
+        //ph是Program Header 是elf中的段结构
         for i in 0..ph_count {
             let ph = elf.program_header(i).unwrap();
-            if ph.get_type().unwrap() == xmas_elf::program::Type::Load {
+            if ph.get_type().unwrap() == xmas_elf::program::Type::Load {//只关心需要被加载到内存的段
                 let start_va: VirtAddr = (ph.virtual_addr() as usize).into();
                 let end_va: VirtAddr = ((ph.virtual_addr() + ph.mem_size()) as usize).into();
                 let mut map_perm = MapPermission::U;
@@ -173,10 +179,11 @@ impl MemorySet {
                     map_perm |= MapPermission::X;
                 }
                 let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
+                //只是创建,真正的加载数据在下面的push,也就是这一步是不改变页表的
                 max_end_vpn = map_area.vpn_range.get_end();
                 memory_set.push(
                     map_area,
-                    Some(&elf.input[ph.offset() as usize..(ph.offset() + ph.file_size()) as usize]),
+                    Some(&elf.input[ph.offset() as usize..(ph.offset() + ph.file_size()) as usize]),//这里定义了实际要拷贝的内存
                 );
             }
         }
@@ -196,6 +203,7 @@ impl MemorySet {
             None,
         );
         // used in sbrk
+        // 是堆内存!!!
         memory_set.push(
             MapArea::new(
                 user_stack_top.into(),
@@ -223,7 +231,11 @@ impl MemorySet {
     }
     /// Change page table by writing satp CSR Register.
     pub fn activate(&self) {
-        let satp = self.page_table.token();
+        let satp = self.page_table.token();//从这一刻开始正式使用虚拟内存
+        //说明这个指令没有jump 不改变pc的值,但是cpu访问地址的方式变了,他开始访问虚拟地址了,那么pc作为虚拟地址还会指向下面那句吗?
+        //我们使用的是恒等映射,这里就发挥作用了,不需要改任何东西,就是连续执行的,只不过多了一步访问页表的工作
+        //不需要刷新cpu缓存吗?
+        //TLB是不是要我执行上面的指令之后才会启用,所以没有缓存目前
         unsafe {
             satp::write(satp);
             asm!("sfence.vma");
@@ -265,8 +277,8 @@ impl MemorySet {
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
-    vpn_range: VPNRange,
-    data_frames: BTreeMap<VirtPageNum, FrameTracker>,
+    vpn_range: VPNRange,//连续的虚拟内存地址
+    data_frames: BTreeMap<VirtPageNum, FrameTracker>,//本身可以使用页表直接实现这个,但是这里是为了效率
     map_type: MapType,
     map_perm: MapPermission,
 }
@@ -291,7 +303,7 @@ impl MapArea {
         let ppn: PhysPageNum;
         match self.map_type {
             MapType::Identical => {
-                ppn = PhysPageNum(vpn.0);
+                ppn = PhysPageNum(vpn.0);//直接映射,这个是内核使用的,所以也不需要alloc:),但是恒等映射也需要页表
             }
             MapType::Framed => {
                 let frame = frame_alloc().unwrap();
@@ -361,8 +373,8 @@ impl MapArea {
 #[derive(Copy, Clone, PartialEq, Debug)]
 /// map type for memory set: identical or framed
 pub enum MapType {
-    Identical,
-    Framed,
+    Identical,//直接映射,这个会确保vpn和ppn相同,目前只看到内核在用,猜测是为了保证内核代码不变,也方便debug
+    Framed, //正常的映射
 }
 
 bitflags! {
@@ -381,12 +393,13 @@ bitflags! {
 
 /// Return (bottom, top) of a kernel stack in kernel space.
 pub fn kernel_stack_position(app_id: usize) -> (usize, usize) {
-    let top = TRAMPOLINE - app_id * (KERNEL_STACK_SIZE + PAGE_SIZE);
+    let top = TRAMPOLINE - app_id * (KERNEL_STACK_SIZE + PAGE_SIZE);//留出保护页面,防止溢出
     let bottom = top - KERNEL_STACK_SIZE;
     (bottom, top)
 }
 
 /// remap test in kernel space
+/// 就是提取几个段的地址,然后测试
 #[allow(unused)]
 pub fn remap_test() {
     let mut kernel_space = KERNEL_SPACE.exclusive_access();

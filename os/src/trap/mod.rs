@@ -56,7 +56,7 @@ pub fn enable_timer_interrupt() {
 /// trap handler
 #[no_mangle]
 pub fn trap_handler() -> ! {
-    set_kernel_trap_entry();
+    set_kernel_trap_entry();//标志进入内核态
     let cx = current_trap_cx();
     let scause = scause::read(); // get trap cause
     let stval = stval::read(); // get extra value
@@ -108,7 +108,7 @@ pub fn trap_return() -> ! {
         fn __alltraps();
         fn __restore();
     }
-    let restore_va = __restore as usize - __alltraps as usize + TRAMPOLINE;
+    let restore_va = __restore as usize - __alltraps as usize + TRAMPOLINE;//计算虚拟地址
     // trace!("[kernel] trap_return: ..before return");
     unsafe {
         asm!(
@@ -126,6 +126,7 @@ pub fn trap_return() -> ! {
 /// handle trap from kernel
 /// Unimplement: traps/interrupts/exceptions from kernel mode
 /// Todo: Chapter 9: I/O device
+/// 在目前实验进入这个就直接崩溃
 pub fn trap_from_kernel() -> ! {
     use riscv::register::sepc;
     trace!("stval = {:#x}, sepc = {:#x}", stval::read(), sepc::read());

@@ -9,8 +9,8 @@ use crate::{
         VirtPageNum,
     },
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, MmapRegion,
+        TaskControlBlock,add_task, current_task, current_user_token, exit_current_and_run_next,
+        suspend_current_and_run_next, MmapRegion, MIN_PRIORITY,
     },
     timer::get_time_us,
 };
@@ -168,7 +168,7 @@ fn prot_to_perm(prot: usize) -> Option<MapPermission> {
 }
 
 /// YOUR JOB: Implement mmap.
-/// mmap是
+/// 这次写简单点,不要那么多嵌套
 pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
     trace!("kernel:pid[{}] sys_mmap", current_task().unwrap().pid.0);
     if start % PAGE_SIZE != 0 {
@@ -197,19 +197,28 @@ pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
     let start_vpn = VirtAddr::from(start).floor();
     let end_vpn = VirtAddr::from(end).ceil();
     let mut vpn = start_vpn.0;
+    // println!("[kenal] start:{} end:{}",vpn,end_vpn.0);
     while vpn < end_vpn.0 {//页表中有了,那么就需要返回错误
-        if inner
+        let mapped = inner
             .memory_set
             .translate(VirtPageNum(vpn))
-            .is_some()
-        {
+            .map(|pte| pte.is_valid())
+            .unwrap_or(false);
+        if mapped {
+            println!("[kernel] pid:{} has the vpn:{}",current_task().unwrap().pid.0,vpn);
             return -1;
         }
+        // if inner
+        //     .memory_set
+        //     .translate(VirtPageNum(vpn))
+        //     .is_some()
+        // {
         vpn += 1;
     }
     inner
         .memory_set
         .insert_framed_area(VirtAddr::from(start), VirtAddr::from(end), perm);
+    //这个是start到end_vpn
     inner.mmap_areas.insert(
         start,
         MmapRegion {
@@ -256,19 +265,43 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
 /// 实现思路:直接向队列里面添加一个,类似最早的时候添加第一个任务一样
-pub fn sys_spawn(_path: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+pub fn sys_spawn(path_ptr: *const u8) -> isize {
+    // trace!(
+    //     "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
+    //     current_task().unwrap().pid.0
+    // );
+    let caller = current_task().unwrap();
+    trace!("kernel:pid[{}] sys_spawn", caller.pid.0);
+    let token = current_user_token();
+    let path = translated_str(token, path_ptr);
+    if let Some(data) = get_app_data_by_name(path.as_str()) {
+        let new_task = Arc::new(TaskControlBlock::new(data));
+        {
+            // set child's parent to current task
+            let mut child_inner = new_task.inner_exclusive_access();
+            child_inner.parent = Some(Arc::downgrade(&caller));
+        }
+        {
+            // record child in parent's list
+            let mut parent_inner = caller.inner_exclusive_access();
+            parent_inner.children.push(new_task.clone());
+        }
+        let pid_spawned = new_task.getpid() as isize;
+        add_task(new_task);
+        pid_spawned
+    } else {
+        -1
+    }
 }
 
-// YOUR JOB: Set task priority.
-pub fn sys_set_priority(_prio: isize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+// 完成了优先级的设置
+pub fn sys_set_priority(prio: isize) -> isize {
+    trace!("kernel:pid[{}] sys_set_priority", current_task().unwrap().pid.0);
+    if prio < MIN_PRIORITY as isize {
+        return -1;
+    }
+    let priority = prio as usize;
+    let task = current_task().unwrap();
+    task.inner_exclusive_access().set_priority(priority);
+    prio
 }

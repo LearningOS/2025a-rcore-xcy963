@@ -2,12 +2,24 @@
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::mm::{MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
+use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefMut;
+
+/// Metadata of a single mmap-ed user region
+#[derive(Clone)]
+pub struct MmapRegion {
+    /// Region start address, page aligned
+    pub start: usize,
+    /// Region length in bytes, already rounded up to page size
+    pub len: usize,
+    /// Permission used when mapping
+    pub perm: MapPermission,
+}
 
 /// Task control block structure
 ///
@@ -68,6 +80,9 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// mmap-ed regions keyed by their start address
+    pub mmap_areas: BTreeMap<usize, MmapRegion>,
 }
 
 impl TaskControlBlockInner {
@@ -118,6 +133,7 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    mmap_areas: BTreeMap::new(),
                 })
             },
         };
@@ -149,6 +165,7 @@ impl TaskControlBlock {
         //根据rust的所有权机制,这个会自动把老的memory_set给释放掉,里面的物理页面也会被dealloc
         // update trap_cx ppn
         inner.trap_cx_ppn = trap_cx_ppn;
+        inner.mmap_areas.clear();
         // initialize base_size
         inner.base_size = user_sp;
         // initialize trap_cx
@@ -192,6 +209,7 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    mmap_areas: parent_inner.mmap_areas.clone(),
                 })
             },
         });

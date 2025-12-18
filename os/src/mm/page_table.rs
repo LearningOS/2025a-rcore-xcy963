@@ -160,7 +160,8 @@ impl PageTable {
     }
 }
 
-/// Translate&Copy a ptr[u8] array with LENGTH len to a mutable u8 Vec through page table
+/// 把输入的地址转化为一个可以写入的slice,注意如果用户骗我们,输入了一个诡异的地址,我们需要不能让内核panic!
+/// 好像他没有验证pte的权限啊
 pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&'static mut [u8]> {
     let page_table = PageTable::from_token(token);
     let mut start = ptr as usize;
@@ -173,7 +174,7 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
         vpn.step();
         let mut end_va: VirtAddr = vpn.into();
         end_va = end_va.min(VirtAddr::from(end));
-        if end_va.page_offset() == 0 {
+        if end_va.page_offset() == 0 {//选到了
             v.push(&mut ppn.get_bytes_array()[start_va.page_offset()..]);
         } else {
             v.push(&mut ppn.get_bytes_array()[start_va.page_offset()..end_va.page_offset()]);

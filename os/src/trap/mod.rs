@@ -115,7 +115,7 @@ pub fn trap_handler() -> ! {
 pub fn trap_return() -> ! {
     set_user_trap_entry();
     let trap_cx_ptr = TRAP_CONTEXT_BASE;
-    let user_satp = current_user_token();
+    let user_satp = current_user_token();//用户的页表
     extern "C" {
         fn __alltraps();
         fn __restore();

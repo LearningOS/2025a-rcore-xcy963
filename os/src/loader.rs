@@ -57,7 +57,7 @@ lazy_static! {
 pub fn get_app_data_by_name(name: &str) -> Option<&'static [u8]> {
     let num_app = get_num_app();
     (0..num_app)
-        .find(|&i| APP_NAMES[i] == name)
+        .find(|&i| APP_NAMES[i] == name)//只找一次,如果是空就不map
         .map(get_app_data)
 }
 ///list all apps

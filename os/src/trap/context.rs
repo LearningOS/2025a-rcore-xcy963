@@ -6,17 +6,17 @@ use riscv::register::sstatus::{self, Sstatus, SPP};
 ///trap context structure containing sstatus, sepc and registers
 pub struct TrapContext {
     /// General-Purpose Register x0-31
-    pub x: [usize; 32],
+    pub x: [usize; 32],//32个寄存器
     /// Supervisor Status Register
-    pub sstatus: Sstatus,
+    pub sstatus: Sstatus,//标记内核态还是用户态的寄存器
     /// Supervisor Exception Program Counter
-    pub sepc: usize,
+    pub sepc: usize,//就是pc
     /// Token of kernel address space
-    pub kernel_satp: usize,
+    pub kernel_satp: usize,//内核的页表
     /// Kernel stack pointer of the current application
-    pub kernel_sp: usize,
+    pub kernel_sp: usize,//应用的内核栈
     /// Virtual address of trap handler entry point in kernel
-    pub trap_handler: usize,
+    pub trap_handler: usize,//trap执行的函数
 }
 
 impl TrapContext {

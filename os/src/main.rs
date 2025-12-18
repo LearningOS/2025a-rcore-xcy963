@@ -104,7 +104,7 @@ pub fn rust_main() -> ! {
     kernel_log_info();
     mm::init();
     mm::remap_test();
-    task::add_initproc();
+    task::add_initproc();//在这个地方把启动程序add进去了,我说run_tasks怎么可能是运行一个空的任务
     println!("after initproc!");
     trap::init();
     trap::enable_timer_interrupt();

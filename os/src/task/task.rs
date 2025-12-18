@@ -12,7 +12,7 @@ use core::cell::RefMut;
 /// Task control block structure
 ///
 /// Directly save the contents that will not change during running
-pub struct TaskControlBlock {
+pub struct TaskControlBlock {//本质是一个链表,但是这个结构体也包含了一个进程的所有信息
     // Immutable
     /// Process identifier
     pub pid: PidHandle,
@@ -101,7 +101,7 @@ impl TaskControlBlock {
         // alloc a pid and a kernel stack in kernel space
         let pid_handle = pid_alloc();
         let kernel_stack = kstack_alloc();
-        let kernel_stack_top = kernel_stack.get_top();
+        let kernel_stack_top = kernel_stack.get_top();//虚拟地址
         // push a task context which goes to trap_return to the top of kernel stack
         let task_control_block = Self {
             pid: pid_handle,
@@ -110,7 +110,7 @@ impl TaskControlBlock {
                 UPSafeCell::new(TaskControlBlockInner {
                     trap_cx_ppn,
                     base_size: user_sp,
-                    task_cx: TaskContext::goto_trap_return(kernel_stack_top),
+                    task_cx: TaskContext::goto_trap_return(kernel_stack_top),//这是从内核态回来的
                     task_status: TaskStatus::Ready,
                     memory_set,
                     parent: None,
@@ -146,6 +146,7 @@ impl TaskControlBlock {
         let mut inner = self.inner_exclusive_access();
         // substitute memory_set
         inner.memory_set = memory_set;
+        //根据rust的所有权机制,这个会自动把老的memory_set给释放掉,里面的物理页面也会被dealloc
         // update trap_cx ppn
         inner.trap_cx_ppn = trap_cx_ppn;
         // initialize base_size

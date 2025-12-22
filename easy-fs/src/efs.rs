@@ -10,9 +10,10 @@ pub struct EasyFileSystem {
     ///Real device
     pub block_device: Arc<dyn BlockDevice>,
     ///Inode bitmap
-    pub inode_bitmap: Bitmap,
+    pub inode_bitmap: Bitmap,//是把一个整数映射到一个bool变量的数据结构
+    //用于实现分配inode,inode是文件的元数据,他记录文件的权限啥的TODO暂未考证
     ///Data bitmap
-    pub data_bitmap: Bitmap,
+    pub data_bitmap: Bitmap,//记录每个data块是否被使用
     inode_area_start_block: u32,
     data_area_start_block: u32,
 }

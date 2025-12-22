@@ -6,6 +6,7 @@ mod stdio;
 use crate::mm::UserBuffer;
 
 /// trait File for all file types
+/// 这个Send + Sync确定了他是线程安全的,也就是要有mutex,原子类型之类的变量
 pub trait File: Send + Sync {
     /// the file readable?
     fn readable(&self) -> bool;

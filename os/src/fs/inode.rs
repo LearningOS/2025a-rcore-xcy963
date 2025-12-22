@@ -40,15 +40,15 @@ impl OSInode {
     /// read all data from the inode
     pub fn read_all(&self) -> Vec<u8> {
         let mut inner = self.inner.exclusive_access();
-        let mut buffer: Vec<u8> = Vec::with_capacity(512);
-        buffer.resize(512, 0);
+        let mut buffer: Vec<u8> = Vec::with_capacity(512);//相当于reserve
+        buffer.resize(512, 0);//相当于填充0
         let mut v: Vec<u8> = Vec::new();
-        loop {
-            let len = inner.inode.read_at(inner.offset, &mut buffer);
+        loop {//一次只读取512字节,也就是一次最多
+            let len = inner.inode.read_at(inner.offset, &mut buffer);//读取512B
             if len == 0 {
                 break;
             }
-            inner.offset += len;
+            inner.offset += len;//这个inode在读取结束之后是销毁的,所以直接修改了他的offset
             v.extend_from_slice(&buffer[..len]);
         }
         v

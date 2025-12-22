@@ -26,6 +26,7 @@ impl Bitmap {
         }
     }
     /// Allocate a new block from a block device
+    /// 这里是找inode位图,所以第一个不是0代表那个块是可以用的,返回那个块的id就好
     pub fn alloc(&self, block_device: &Arc<dyn BlockDevice>) -> Option<usize> {
         for block_id in 0..self.blocks {
             let pos = get_block_cache(

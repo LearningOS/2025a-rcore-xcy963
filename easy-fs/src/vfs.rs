@@ -99,7 +99,7 @@ impl Inode {
             // has the file been created?
             self.find_inode_id(name, root_inode)
         };
-        if self.read_disk_inode(op).is_some() {
+        if self.read_disk_inode(op).is_some() {//不能重复
             return None;
         }
         // create a new file
@@ -141,7 +141,9 @@ impl Inode {
     /// List inodes under current inode
     pub fn ls(&self) -> Vec<String> {
         let _fs = self.fs.lock();
-        self.read_disk_inode(|disk_inode| {
+        //这个是对rootinode进行操作的,他是一个文件夹的类型,里面存放的是好多DirEntry
+        self.read_disk_inode(|disk_inode| {//把这个内存上的数据直接翻译成结构体
+            //从这里开始时候对磁盘上的inode进行操作了
             let file_count = (disk_inode.size as usize) / DIRENT_SZ;
             let mut v: Vec<String> = Vec::new();
             for i in 0..file_count {

@@ -28,7 +28,9 @@ pub use context::TaskContext;
 use lazy_static::*;
 pub use manager::{fetch_task, TaskManager};
 use switch::__switch;
-pub use task::{TaskControlBlock, TaskStatus};
+pub use task::{
+    MmapRegion, TaskControlBlock, TaskStatus, BIG_STRIDE, DEFAULT_PRIORITY, MIN_PRIORITY,
+};
 
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use manager::add_task;

@@ -3,13 +3,33 @@ use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::fs::{File, Stdin, Stdout};
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::mm::{MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
+use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
+use core::cmp;
+
+/// Metadata of a single mmap-ed user region
+#[derive(Clone)]
+pub struct MmapRegion {
+    /// Region start address, page aligned
+    pub start: usize,
+    /// Region length in bytes, already rounded up to page size
+    pub len: usize,
+    /// Permission used when mapping
+    pub perm: MapPermission,
+}
+
+/// Large stride constant used for stride scheduling.
+pub const BIG_STRIDE: usize = 1 << 20;
+/// Default priority assigned to new tasks.
+pub const DEFAULT_PRIORITY: usize = 16;
+/// Minimum allowed priority for stride scheduling.
+pub const MIN_PRIORITY: usize = 2;
 
 /// Task control block structure
 ///
@@ -71,6 +91,16 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// mmap-ed regions keyed by their start address
+    pub mmap_areas: BTreeMap<usize, MmapRegion>,
+
+    /// Stride scheduling priority (bigger => more CPU time)
+    pub priority: usize,
+    /// Current accumulated stride
+    pub stride: usize,
+    /// Amount to add to stride whenever task is scheduled
+    pub stride_pass: usize,
 }
 
 impl TaskControlBlockInner {
@@ -86,6 +116,16 @@ impl TaskControlBlockInner {
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
     }
+    fn refresh_stride_pass(&mut self) {
+        self.stride_pass = stride_pass_from_priority(self.priority);
+    }
+    pub fn set_priority(&mut self, priority: usize) {
+        self.priority = priority;
+        self.refresh_stride_pass();
+    }
+    pub fn add_stride(&mut self) {
+        self.stride = self.stride.saturating_add(self.stride_pass);
+    }
     pub fn alloc_fd(&mut self) -> usize {
         if let Some(fd) = (0..self.fd_table.len()).find(|fd| self.fd_table[*fd].is_none()) {
             fd
@@ -94,6 +134,11 @@ impl TaskControlBlockInner {
             self.fd_table.len() - 1
         }
     }
+}
+
+fn stride_pass_from_priority(priority: usize) -> usize {
+    let prio = cmp::max(priority, 1);
+    cmp::max(1, BIG_STRIDE / prio)
 }
 
 impl TaskControlBlock {
@@ -135,6 +180,10 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    mmap_areas: BTreeMap::new(),
+                    priority: DEFAULT_PRIORITY,
+                    stride: 0,
+                    stride_pass: stride_pass_from_priority(DEFAULT_PRIORITY),
                 })
             },
         };
@@ -165,6 +214,9 @@ impl TaskControlBlock {
         inner.memory_set = memory_set;
         // update trap_cx ppn
         inner.trap_cx_ppn = trap_cx_ppn;
+        inner.mmap_areas.clear();
+        // initialize base_size
+        inner.base_size = user_sp;
         // initialize trap_cx
         let trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -216,6 +268,10 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    mmap_areas: parent_inner.mmap_areas.clone(),
+                    priority: parent_inner.priority,
+                    stride: 0,
+                    stride_pass: parent_inner.stride_pass,
                 })
             },
         });

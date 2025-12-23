@@ -72,7 +72,7 @@ pub fn rust_main() -> ! {
     mm::remap_test();
     trap::init();
     trap::enable_timer_interrupt();
-    timer::set_next_trigger();//中断这么早开?不会等下在内核态进中断然后报错吗?
+    timer::set_next_trigger(); //中断这么早开?不会等下在内核态进中断然后报错吗?
     fs::list_apps();
     task::add_initproc();
     task::run_tasks();

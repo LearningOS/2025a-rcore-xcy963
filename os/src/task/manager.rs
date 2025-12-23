@@ -1,5 +1,5 @@
 //!Implementation of [`TaskManager`]
-use super::{TaskControlBlock,BIG_STRIDE};
+use super::{TaskControlBlock, BIG_STRIDE};
 use crate::sync::UPSafeCell;
 use alloc::collections::BinaryHeap;
 use alloc::sync::Arc;
@@ -21,7 +21,7 @@ impl TaskManager {
     /// Add process back to ready queue
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
         let stride = { task.inner_exclusive_access().stride };
-        let pid = task.getpid();//pid是唯一的,除非进程被回收
+        let pid = task.getpid(); //pid是唯一的,除非进程被回收
         let entry = StrideEntry::new(stride, pid, task);
         self.ready_queue.push(entry);
     }
@@ -88,30 +88,32 @@ impl PartialOrd for StrideEntry {
         // )
         let diff: isize = (self.stride as isize) - (other.stride as isize);
         if diff == 0 {
-            if self.pid > other.pid {//这个地方使用了pid的唯一性
-                return Some(Ordering::Greater)
-            }else{
+            if self.pid > other.pid {
+                //这个地方使用了pid的唯一性
+                return Some(Ordering::Greater);
+            } else {
                 return Some(Ordering::Less);
             }
         }
-        let diff_abs = if diff>0{
+        let diff_abs = if diff > 0 {
             diff as usize
-        }else{
+        } else {
             -diff as usize
         };
         // 若 diff <= BIG_STRIDE / 2, 说明 self.stride >= other.stride (没有溢出)。
         // 我们希望 BinaryHeap 弹出真实最小的 stride，因此需要把“更小”当成“更大”。
         if diff_abs <= BIG_STRIDE / 2 {
-            if diff > 0{
-                return Some(Ordering::Greater)
-            }else{
-                return Some(Ordering::Less)
+            if diff > 0 {
+                return Some(Ordering::Greater);
+            } else {
+                return Some(Ordering::Less);
             }
-        } else {//超过一个环了
-            if diff < 0{
-                return Some(Ordering::Greater)
-            }else{
-                return Some(Ordering::Less)
+        } else {
+            //超过一个环了
+            if diff < 0 {
+                return Some(Ordering::Greater);
+            } else {
+                return Some(Ordering::Less);
             }
         }
     }

@@ -10,10 +10,10 @@ pub struct EasyFileSystem {
     ///Real device
     pub block_device: Arc<dyn BlockDevice>,
     ///Inode bitmap
-    pub inode_bitmap: Bitmap,//是把一个整数映射到一个bool变量的数据结构
+    pub inode_bitmap: Bitmap, //是把一个整数映射到一个bool变量的数据结构
     //用于实现分配inode,inode是文件的元数据,他记录文件的权限啥的TODO暂未考证
     ///Data bitmap
-    pub data_bitmap: Bitmap,//记录每个data块是否被使用
+    pub data_bitmap: Bitmap, //记录每个data块是否被使用
     inode_area_start_block: u32,
     data_area_start_block: u32,
 }
@@ -125,6 +125,13 @@ impl EasyFileSystem {
     /// Get data block by id
     pub fn get_data_block_id(&self, data_block_id: u32) -> u32 {
         self.data_area_start_block + data_block_id
+    }
+    /// Get inode id from its position
+    pub fn get_inode_id(&self, block_id: u32, block_offset: usize) -> u32 {
+        let inode_size = core::mem::size_of::<DiskInode>();
+        let inodes_per_block = (BLOCK_SZ / inode_size) as u32;
+        let block_index = block_id - self.inode_area_start_block;
+        block_index * inodes_per_block + (block_offset / inode_size) as u32
     }
     /// Allocate a new inode
     pub fn alloc_inode(&mut self) -> u32 {

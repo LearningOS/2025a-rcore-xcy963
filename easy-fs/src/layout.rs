@@ -80,7 +80,8 @@ type IndirectBlock = [u32; BLOCK_SZ / 4];
 type DataBlock = [u8; BLOCK_SZ];
 /// A disk inode
 #[repr(C)]
-pub struct DiskInode {//在磁盘上一个inode的结构就是这样子存放数据的
+pub struct DiskInode {
+    //在磁盘上一个inode的结构就是这样子存放数据的
     pub size: u32,
     pub direct: [u32; INODE_DIRECT_COUNT],
     pub indirect1: u32,
@@ -316,20 +317,21 @@ impl DiskInode {
         block_device: &Arc<dyn BlockDevice>,
     ) -> usize {
         let mut start = offset;
-        let end = (offset + buf.len()).min(self.size as usize);//为什么是这样子取最小?
-        //这个地方的self.size不是这个文件的最小,而是所有程序的大小,然后目录的名字是从偏移为0的地方开始存储的,所以是最后和size比较大小
+        let end = (offset + buf.len()).min(self.size as usize); //为什么是这样子取最小?
+                                                                //这个地方的self.size不是这个文件的最小,而是所有程序的大小,然后目录的名字是从偏移为0的地方开始存储的,所以是最后和size比较大小
         if start >= end {
             return 0;
         }
-        let mut start_block = start / BLOCK_SZ;//返回是第几个block,之后再查询这个diskinode的direct表知道具体的磁盘编号
+        let mut start_block = start / BLOCK_SZ; //返回是第几个block,之后再查询这个diskinode的direct表知道具体的磁盘编号
         let mut read_size = 0usize;
-        loop {//主要功能是处理文件跨block的情况
+        loop {
+            //主要功能是处理文件跨block的情况
             // calculate end of current block
-            let mut end_current_block = (start / BLOCK_SZ + 1) * BLOCK_SZ;//简单的向上取整
+            let mut end_current_block = (start / BLOCK_SZ + 1) * BLOCK_SZ; //简单的向上取整
             end_current_block = end_current_block.min(end);
             // read and update read size
             let block_read_size = end_current_block - start;
-            let dst = &mut buf[read_size..read_size + block_read_size];//从read
+            let dst = &mut buf[read_size..read_size + block_read_size]; //从read
             get_block_cache(
                 self.get_block_id(start_block as u32, block_device) as usize,
                 Arc::clone(block_device),
@@ -389,11 +391,11 @@ impl DiskInode {
         write_size
     }
 }
-/// A directory entry
+/// A directory entry,我们保证这个是4字节对齐的,所以不需要管pack的事情
 #[repr(C)]
 pub struct DirEntry {
-    name: [u8; NAME_LENGTH_LIMIT + 1],
-    inode_id: u32,
+    name: [u8; NAME_LENGTH_LIMIT + 1],//28
+    inode_id: u32,//4
 }
 /// Size of a directory entry
 pub const DIRENT_SZ: usize = 32;

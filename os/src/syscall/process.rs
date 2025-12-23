@@ -72,7 +72,11 @@ pub fn sys_exec(path: *const u8) -> isize {
 /// If there is not a child process whose pid is same as given, return -1.
 /// Else if there is a child process but it is still running, return -2.
 pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
-    trace!("kernel:pid[{}] sys_waitpid [{}]", current_task().unwrap().pid.0, pid);
+    trace!(
+        "kernel:pid[{}] sys_waitpid [{}]",
+        current_task().unwrap().pid.0,
+        pid
+    );
     let task = current_task().unwrap();
     // find a child process
 
@@ -119,9 +123,8 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
         usec: time_us % 1_000_000,
     };
     let len = core::mem::size_of::<TimeVal>();
-    let src = unsafe {
-        core::slice::from_raw_parts((&timeval as *const TimeVal) as *const u8, len)
-    };
+    let src =
+        unsafe { core::slice::from_raw_parts((&timeval as *const TimeVal) as *const u8, len) };
     let mut copied = 0usize;
     let mut buffers = translated_byte_buffer(current_user_token(), ts as *const u8, len);
     for buffer in buffers.iter_mut() {
@@ -132,7 +135,11 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
         buffer[..copy_len].copy_from_slice(&src[copied..copied + copy_len]);
         copied += copy_len;
     }
-    if copied == len { 0 } else { -1 }
+    if copied == len {
+        0
+    } else {
+        -1
+    }
 }
 
 fn align_up_len(len: usize) -> Option<usize> {
@@ -275,7 +282,10 @@ pub fn sys_spawn(path_ptr: *const u8) -> isize {
 
 // Set task priority for stride scheduler.
 pub fn sys_set_priority(prio: isize) -> isize {
-    trace!("kernel:pid[{}] sys_set_priority", current_task().unwrap().pid.0);
+    trace!(
+        "kernel:pid[{}] sys_set_priority",
+        current_task().unwrap().pid.0
+    );
     if prio < MIN_PRIORITY as isize {
         return -1;
     }

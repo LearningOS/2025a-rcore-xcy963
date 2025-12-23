@@ -99,7 +99,8 @@ impl Inode {
             // has the file been created?
             self.find_inode_id(name, root_inode)
         };
-        if self.read_disk_inode(op).is_some() {//不能重复
+        if self.read_disk_inode(op).is_some() {
+            //不能重复
             return None;
         }
         // create a new file
@@ -142,7 +143,8 @@ impl Inode {
     pub fn ls(&self) -> Vec<String> {
         let _fs = self.fs.lock();
         //这个是对rootinode进行操作的,他是一个文件夹的类型,里面存放的是好多DirEntry
-        self.read_disk_inode(|disk_inode| {//把这个内存上的数据直接翻译成结构体
+        self.read_disk_inode(|disk_inode| {
+            //把这个内存上的数据直接翻译成结构体
             //从这里开始时候对磁盘上的inode进行操作了
             let file_count = (disk_inode.size as usize) / DIRENT_SZ;
             let mut v: Vec<String> = Vec::new();
@@ -161,6 +163,15 @@ impl Inode {
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> usize {
         let _fs = self.fs.lock();
         self.read_disk_inode(|disk_inode| disk_inode.read_at(offset, buf, &self.block_device))
+    }
+    /// Get inode id of current inode
+    pub fn inode_id(&self) -> u32 {
+        let fs = self.fs.lock();
+        fs.get_inode_id(self.block_id as u32, self.block_offset)
+    }
+    /// Whether current inode is a directory
+    pub fn is_dir(&self) -> bool {
+        self.read_disk_inode(|disk_inode| disk_inode.is_dir())
     }
     /// Write data to current inode
     pub fn write_at(&self, offset: usize, buf: &[u8]) -> usize {
@@ -184,5 +195,68 @@ impl Inode {
             }
         });
         block_cache_sync_all();
+    }
+    /// Create a hard link under current directory pointing to `inode_id`
+    pub fn link(&self, name: &str, inode_id: u32) -> Option<()> {
+        let mut fs = self.fs.lock();
+        // let op = |root_inode: &DiskInode| {//先不考虑新的名字是否存在于目录中
+        //     assert!(root_inode.is_dir());
+        //     self.find_inode_id(name, root_inode)
+        // };
+        // if self.read_disk_inode(op).is_some() {
+        //     return None;
+        // }
+        self.modify_disk_inode(|root_inode| {
+            assert!(root_inode.is_dir());
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            self.increase_size(new_size as u32, root_inode, &mut fs);
+            let dirent = DirEntry::new(name, inode_id);
+            root_inode.write_at(
+                file_count * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device,
+            );
+        });
+        block_cache_sync_all();
+        Some(())
+    }
+    /// Remove a directory entry under current directory
+    pub fn unlink(&self, name: &str) -> Option<u32> {
+        let inode_id = self.read_disk_inode(|root_inode| {
+            assert!(root_inode.is_dir());
+            self.find_inode_id(name, root_inode)
+        })?;
+        self.modify_disk_inode(|root_inode| {
+            assert!(root_inode.is_dir());
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let mut dirent = DirEntry::empty();
+            let mut target_idx = None;
+            for i in 0..file_count {
+                root_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device);
+                if dirent.name() == name {
+                    target_idx = Some(i);
+                    break;
+                }
+            }
+            if let Some(idx) = target_idx {
+                if file_count > 1 && idx != file_count - 1 {
+                    let mut last_dirent = DirEntry::empty();
+                    root_inode.read_at(
+                        (file_count - 1) * DIRENT_SZ,
+                        last_dirent.as_bytes_mut(),
+                        &self.block_device,
+                    );//把最后的拿过来覆盖,用这个方法删除是o(1)的复杂度
+                    root_inode.write_at(
+                        idx * DIRENT_SZ,
+                        last_dirent.as_bytes(),
+                        &self.block_device,
+                    );
+                }
+                root_inode.size = ((file_count - 1) * DIRENT_SZ) as u32;
+            }
+        });
+        block_cache_sync_all();
+        Some(inode_id)
     }
 }

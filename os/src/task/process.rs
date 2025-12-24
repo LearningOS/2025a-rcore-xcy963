@@ -34,7 +34,7 @@ pub struct ProcessControlBlockInner {
     /// children process
     pub children: Vec<Arc<ProcessControlBlock>>,
     /// exit code
-    pub exit_code: i32,
+    pub exit_code: i32,//变为zombi的时候回收读取
     /// file descriptor table
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
     /// signal flags

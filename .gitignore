@@ -23,3 +23,5 @@ pushall.sh
 ci-user/
 user/
 os/vendor/
+
+debug_tools

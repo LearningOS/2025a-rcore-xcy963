@@ -49,6 +49,19 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// deadlock detection flag
+    pub deadlock_detect: bool,
+    /// resource availability for deadlock detection
+    pub dl_available: Vec<usize>,
+    /// allocation matrix[tid][res] for deadlock detection
+    pub dl_allocation: Vec<Vec<usize>>,
+    /// pending need matrix[tid][res] for deadlock detection
+    pub dl_need: Vec<Vec<usize>>,
+    /// resource index mapping for mutex id
+    pub dl_mutex_res: Vec<Option<usize>>,//为了拓展性,对其他资源建立一个链表,可以查到对应的资源
+    /// resource index mapping for semaphore id
+    pub dl_sem_res: Vec<Option<usize>>,
+    // pub dead_lock:bool,
 }
 
 impl ProcessControlBlockInner {
@@ -81,6 +94,92 @@ impl ProcessControlBlockInner {
     /// get a task with tid in this process
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
+    }
+
+    pub(crate) fn ensure_dl_task(&mut self, tid: usize) {//声明为内部函数
+        let cols = self.dl_available.len();
+        if tid >= self.dl_allocation.len() {
+            self.dl_allocation.resize(tid + 1, Vec::new());
+            self.dl_need.resize(tid + 1, Vec::new());
+        }
+        if self.dl_allocation[tid].len() < cols {
+            self.dl_allocation[tid].resize(cols, 0);
+        }
+        if self.dl_need[tid].len() < cols {
+            self.dl_need[tid].resize(cols, 0);
+        }
+    }
+
+    pub(crate) fn add_resource(&mut self, cap: usize) -> usize {
+        self.dl_available.push(cap);
+        for row in &mut self.dl_allocation {//刚开始创建的时候每个线程都还没拥有这个资源
+            row.push(0);
+        }
+        for row in &mut self.dl_need {//刚开始的时候每个线程不需要这个资源???
+            row.push(cap);
+        }
+        self.dl_available.len() - 1
+    }
+
+    fn is_dl_safe(&self) -> bool {
+        let mut work = self.dl_available.clone();
+        let mut finish = vec![false; self.dl_allocation.len()];
+        let empty: Vec<usize> = Vec::new();
+        loop {
+            let mut progress = false;//如果这一轮没有任何更新,那么算法结束,我们已经不能完成更多的进程
+            for i in 0..self.dl_allocation.len() {//遍历所有的进程
+                if finish[i] {
+                    continue;
+                }
+                let row_need = self.dl_need.get(i).unwrap_or(&empty);
+                if row_need
+                    .iter()
+                    .enumerate()
+                    .all(|(j, n)| *n <= *work.get(j).unwrap_or(&0))
+                {
+                    for (j, a) in self.dl_allocation[i].iter().enumerate() {
+                        if j < work.len() {//更新work,假设释放这个线程所有的资源
+                            work[j] += a;
+                        }
+                    }
+                    finish[i] = true;
+                    progress = true;
+                }
+            }
+            if !progress {
+                break;
+            }
+        }
+        finish.into_iter().all(|f| f)
+    }
+
+    pub(crate) fn dl_try_request(&mut self, tid: usize, res_idx: usize) -> bool {
+        self.ensure_dl_task(tid);
+        self.dl_allocation[tid][res_idx] += 1;
+        self.dl_available[res_idx] = self.dl_available[res_idx].saturating_sub(1);
+        self.dl_need[tid][res_idx] -= 1;
+        let safe = self.is_dl_safe();
+        if !safe {
+            self.dl_need[tid][res_idx] += 1;
+            self.dl_allocation[tid][res_idx] -= 1;
+            self.dl_available[res_idx] += 1;
+        }
+        safe
+    }
+
+    // pub(crate) fn dl_finish_request(&mut self, tid: usize, res_idx: usize) {
+    //     self.ensure_dl_task(tid);
+    //     self.dl_need[tid][res_idx] = self.dl_need[tid][res_idx].saturating_sub(1);
+    //     self.dl_available[res_idx] = self.dl_available[res_idx].saturating_sub(1);
+    //     self.dl_allocation[tid][res_idx] += 1;
+    // }
+
+    pub(crate) fn dl_release_resource(&mut self, tid: usize, res_idx: usize) {
+        self.ensure_dl_task(tid);
+        if self.dl_allocation[tid][res_idx] > 0 {
+            self.dl_allocation[tid][res_idx] -= 1;
+        }
+        self.dl_available[res_idx] += 1;
     }
 }
 
@@ -119,6 +218,12 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    deadlock_detect: false,
+                    dl_available: Vec::new(),
+                    dl_allocation: Vec::new(),
+                    dl_need: Vec::new(),
+                    dl_mutex_res: Vec::new(),
+                    dl_sem_res: Vec::new(),
                 })
             },
         });
@@ -245,6 +350,13 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    //
+                    deadlock_detect:parent.deadlock_detect,
+                    dl_available:parent.dl_available.clone(),
+                    dl_allocation:parent.dl_allocation.clone(),
+                    dl_need:parent.dl_need.clone(),
+                    dl_mutex_res:parent.dl_mutex_res.clone(),
+                    dl_sem_res:parent.dl_sem_res.clone(),
                 })
             },
         });

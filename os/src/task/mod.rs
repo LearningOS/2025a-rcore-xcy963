@@ -26,7 +26,7 @@ use crate::timer::remove_timer;
 use alloc::{sync::Arc, vec::Vec};
 use lazy_static::*;
 use manager::fetch_task;
-use process::{ProcessControlBlock};
+pub use process::{MmapRegion, ProcessControlBlock};
 use switch::__switch;
 
 pub use context::TaskContext;
@@ -37,7 +37,7 @@ pub use processor::{
     current_user_token, run_tasks, schedule, take_current_task,
 };
 pub use signal::SignalFlags;
-pub use task::{TaskControlBlock, TaskStatus};
+pub use task::{TaskControlBlock, TaskStatus, BIG_STRIDE, DEFAULT_PRIORITY, MIN_PRIORITY};
 
 /// Make current task suspended and switch to the next task
 pub fn suspend_current_and_run_next() {
@@ -154,6 +154,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
 
         let mut process_inner = process.inner_exclusive_access();
         process_inner.children.clear();
+        process_inner.mmap_areas.clear();
         // deallocate other data in user space i.e. program code/data section
         process_inner.memory_set.recycle_data_pages();
         // drop file descriptors

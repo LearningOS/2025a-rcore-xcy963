@@ -5,10 +5,12 @@ use super::manager::insert_into_pid2process;
 use super::TaskControlBlock;
 use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
+use crate::config::USER_STACK_SIZE;
 use crate::fs::{File, Stdin, Stdout};
-use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
+use crate::mm::{translated_refmut, MapPermission, MemorySet, VirtAddr, KERNEL_SPACE};
 use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
 use crate::trap::{trap_handler, TrapContext};
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
@@ -34,7 +36,7 @@ pub struct ProcessControlBlockInner {
     /// children process
     pub children: Vec<Arc<ProcessControlBlock>>,
     /// exit code
-    pub exit_code: i32,//变为zombi的时候回收读取
+    pub exit_code: i32, //变为zombi的时候回收读取
     /// file descriptor table
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
     /// signal flags
@@ -58,10 +60,26 @@ pub struct ProcessControlBlockInner {
     /// pending need matrix[tid][res] for deadlock detection
     pub dl_need: Vec<Vec<usize>>,
     /// resource index mapping for mutex id
-    pub dl_mutex_res: Vec<Option<usize>>,//为了拓展性,对其他资源建立一个链表,可以查到对应的资源
+    pub dl_mutex_res: Vec<Option<usize>>, //为了拓展性,对其他资源建立一个链表,可以查到对应的资源
     /// resource index mapping for semaphore id
     pub dl_sem_res: Vec<Option<usize>>,
+    /// mmap regions
+    pub mmap_areas: BTreeMap<usize, MmapRegion>,
+    /// program break lower bound
+    pub heap_bottom: usize,
+    /// current program break
+    pub program_brk: usize,
     // pub dead_lock:bool,
+}
+///测试map的
+#[derive(Clone)]
+pub struct MmapRegion {
+    /// Region start address, page aligned
+    pub start: usize,
+    /// Region length in bytes, already rounded up to page size
+    pub len: usize,
+    /// Permission used when mapping
+    pub perm: MapPermission,
 }
 
 impl ProcessControlBlockInner {
@@ -96,7 +114,8 @@ impl ProcessControlBlockInner {
         self.tasks[tid].as_ref().unwrap().clone()
     }
 
-    pub(crate) fn ensure_dl_task(&mut self, tid: usize) {//声明为内部函数
+    pub(crate) fn ensure_dl_task(&mut self, tid: usize) {
+        //声明为内部函数
         let cols = self.dl_available.len();
         if tid >= self.dl_allocation.len() {
             self.dl_allocation.resize(tid + 1, Vec::new());
@@ -112,10 +131,12 @@ impl ProcessControlBlockInner {
 
     pub(crate) fn add_resource(&mut self, cap: usize) -> usize {
         self.dl_available.push(cap);
-        for row in &mut self.dl_allocation {//刚开始创建的时候每个线程都还没拥有这个资源
+        for row in &mut self.dl_allocation {
+            //刚开始创建的时候每个线程都还没拥有这个资源
             row.push(0);
         }
-        for row in &mut self.dl_need {//刚开始的时候每个线程不需要这个资源???
+        for row in &mut self.dl_need {
+            //刚开始的时候每个线程不需要这个资源???
             row.push(cap);
         }
         self.dl_available.len() - 1
@@ -126,8 +147,9 @@ impl ProcessControlBlockInner {
         let mut finish = vec![false; self.dl_allocation.len()];
         let empty: Vec<usize> = Vec::new();
         loop {
-            let mut progress = false;//如果这一轮没有任何更新,那么算法结束,我们已经不能完成更多的进程
-            for i in 0..self.dl_allocation.len() {//遍历所有的进程
+            let mut progress = false; //如果这一轮没有任何更新,那么算法结束,我们已经不能完成更多的进程
+            for i in 0..self.dl_allocation.len() {
+                //遍历所有的进程
                 if finish[i] {
                     continue;
                 }
@@ -138,7 +160,8 @@ impl ProcessControlBlockInner {
                     .all(|(j, n)| *n <= *work.get(j).unwrap_or(&0))
                 {
                     for (j, a) in self.dl_allocation[i].iter().enumerate() {
-                        if j < work.len() {//更新work,假设释放这个线程所有的资源
+                        if j < work.len() {
+                            //更新work,假设释放这个线程所有的资源
                             work[j] += a;
                         }
                     }
@@ -192,7 +215,13 @@ impl ProcessControlBlock {
     pub fn new(elf_data: &[u8]) -> Arc<Self> {
         trace!("kernel: ProcessControlBlock::new");
         // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        let (mut memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        let heap_bottom = ustack_base + USER_STACK_SIZE;
+        memory_set.insert_framed_area(
+            heap_bottom.into(),
+            heap_bottom.into(),
+            MapPermission::R | MapPermission::W | MapPermission::U,
+        );
         // allocate a pid
         let pid_handle = pid_alloc();
         let process = Arc::new(Self {
@@ -224,6 +253,9 @@ impl ProcessControlBlock {
                     dl_need: Vec::new(),
                     dl_mutex_res: Vec::new(),
                     dl_sem_res: Vec::new(),
+                    mmap_areas: BTreeMap::new(),
+                    heap_bottom,
+                    program_brk: heap_bottom,
                 })
             },
         });
@@ -262,11 +294,23 @@ impl ProcessControlBlock {
         assert_eq!(self.inner_exclusive_access().thread_count(), 1);
         // memory_set with elf program headers/trampoline/trap context/user stack
         trace!("kernel: exec .. MemorySet::from_elf");
-        let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        let (mut memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        let heap_bottom = ustack_base + USER_STACK_SIZE;
+        memory_set.insert_framed_area(
+            heap_bottom.into(),
+            heap_bottom.into(),
+            MapPermission::R | MapPermission::W | MapPermission::U,
+        );
         let new_token = memory_set.token();
         // substitute memory_set
         trace!("kernel: exec .. substitute memory_set");
-        self.inner_exclusive_access().memory_set = memory_set;
+        {
+            let mut process_inner = self.inner_exclusive_access();
+            process_inner.memory_set = memory_set;
+            process_inner.mmap_areas.clear();
+            process_inner.heap_bottom = heap_bottom;
+            process_inner.program_brk = heap_bottom;
+        }
         // then we alloc user resource for main thread again
         // since memory_set has been changed
         trace!("kernel: exec .. alloc user resource for main thread again");
@@ -320,6 +364,16 @@ impl ProcessControlBlock {
         trace!("kernel: fork");
         let mut parent = self.inner_exclusive_access();
         assert_eq!(parent.thread_count(), 1);
+        let parent_main = parent.get_task(0);
+        let (parent_priority, parent_stride, heap_bottom, program_brk) = {
+            let inner = parent_main.inner_exclusive_access();
+            (
+                inner.priority,
+                inner.stride,
+                parent.heap_bottom,
+                parent.program_brk,
+            )
+        };
         // clone parent's memory_set completely including trampoline/ustacks/trap_cxs
         let memory_set = MemorySet::from_existed_user(&parent.memory_set);
         // alloc a pid
@@ -351,12 +405,15 @@ impl ProcessControlBlock {
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
                     //
-                    deadlock_detect:parent.deadlock_detect,
-                    dl_available:parent.dl_available.clone(),
-                    dl_allocation:parent.dl_allocation.clone(),
-                    dl_need:parent.dl_need.clone(),
-                    dl_mutex_res:parent.dl_mutex_res.clone(),
-                    dl_sem_res:parent.dl_sem_res.clone(),
+                    deadlock_detect: parent.deadlock_detect,
+                    dl_available: parent.dl_available.clone(),
+                    dl_allocation: parent.dl_allocation.clone(),
+                    dl_need: parent.dl_need.clone(),
+                    dl_mutex_res: parent.dl_mutex_res.clone(),
+                    dl_sem_res: parent.dl_sem_res.clone(),
+                    mmap_areas: parent.mmap_areas.clone(),
+                    heap_bottom,
+                    program_brk,
                 })
             },
         });
@@ -376,6 +433,11 @@ impl ProcessControlBlock {
             // but mention that we allocate a new kstack here
             false,
         ));
+        {
+            let mut task_inner = task.inner_exclusive_access();
+            task_inner.set_priority(parent_priority);
+            task_inner.stride = parent_stride;
+        }
         // attach task to child process
         let mut child_inner = child.inner_exclusive_access();
         child_inner.tasks.push(Some(Arc::clone(&task)));
@@ -393,5 +455,32 @@ impl ProcessControlBlock {
     /// get pid
     pub fn getpid(&self) -> usize {
         self.pid.0
+    }
+
+    /// change the location of the program break. return None if failed.
+    pub fn change_program_brk(&self, size: i32) -> Option<usize> {
+        let mut inner = self.inner_exclusive_access();
+        let heap_bottom = inner.heap_bottom;
+        let old_break = inner.program_brk;
+        let new_brk = (inner.program_brk as isize).checked_add(size as isize)?;
+        if new_brk < heap_bottom as isize {
+            return None;
+        }
+        let new_brk = new_brk as usize;
+        let ok = if size < 0 {
+            inner
+                .memory_set
+                .shrink_to(VirtAddr::from(heap_bottom), VirtAddr::from(new_brk))
+        } else {
+            inner
+                .memory_set
+                .append_to(VirtAddr::from(heap_bottom), VirtAddr::from(new_brk))
+        };
+        if ok {
+            inner.program_brk = new_brk;
+            Some(old_break)
+        } else {
+            None
+        }
     }
 }

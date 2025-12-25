@@ -197,4 +197,65 @@ impl Inode {
         });
         block_cache_sync_all();
     }
+    /// Get inode id
+    pub fn inode_id(&self) -> u32 {
+        let fs = self.fs.lock();
+        fs.get_inode_id(self.block_id as u32, self.block_offset)
+    }
+    /// Whether the inode is a directory
+    pub fn is_dir(&self) -> bool {
+        self.read_disk_inode(|disk_inode| disk_inode.is_dir())
+    }
+    /// Create a hard link under current directory pointing to `inode_id`
+    pub fn link(&self, name: &str, inode_id: u32) -> Option<()> {
+        let mut fs = self.fs.lock();
+        self.modify_disk_inode(|root_inode| {
+            assert!(root_inode.is_dir());
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            self.increase_size(new_size as u32, root_inode, &mut fs);
+            let dirent = DirEntry::new(name, inode_id);
+            root_inode.write_at(file_count * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
+        });
+        block_cache_sync_all();
+        Some(())
+    }
+    /// Remove a directory entry under current directory
+    pub fn unlink(&self, name: &str) -> Option<u32> {
+        let inode_id = self.read_disk_inode(|root_inode| {
+            assert!(root_inode.is_dir());
+            self.find_inode_id(name, root_inode)
+        })?;
+        self.modify_disk_inode(|root_inode| {
+            assert!(root_inode.is_dir());
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let mut dirent = DirEntry::empty();
+            let mut target_idx = None;
+            for i in 0..file_count {
+                root_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device);
+                if dirent.name() == name {
+                    target_idx = Some(i);
+                    break;
+                }
+            }
+            if let Some(idx) = target_idx {
+                if file_count > 1 && idx != file_count - 1 {
+                    let mut last_dirent = DirEntry::empty();
+                    root_inode.read_at(
+                        (file_count - 1) * DIRENT_SZ,
+                        last_dirent.as_bytes_mut(),
+                        &self.block_device,
+                    );
+                    root_inode.write_at(
+                        idx * DIRENT_SZ,
+                        last_dirent.as_bytes(),
+                        &self.block_device,
+                    );
+                }
+                root_inode.size = ((file_count - 1) * DIRENT_SZ) as u32;
+            }
+        });
+        block_cache_sync_all();
+        Some(inode_id)
+    }
 }

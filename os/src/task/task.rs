@@ -6,9 +6,17 @@ use crate::trap::TrapContext;
 use crate::{mm::PhysPageNum, sync::UPSafeCell};
 use alloc::sync::{Arc, Weak};
 use core::cell::RefMut;
+use core::cmp;
+
+/// Large stride constant used for stride scheduling.
+pub const BIG_STRIDE: usize = 1 << 20;
+/// Default priority assigned to new tasks.
+pub const DEFAULT_PRIORITY: usize = 16;
+/// Minimum allowed priority for stride scheduling.
+pub const MIN_PRIORITY: usize = 2;
 
 /// Task control block structure
-pub struct TaskControlBlock {
+pub struct TaskControlBlock {//task没有id了...
     /// immutable
     pub process: Weak<ProcessControlBlock>,
     /// Kernel stack corresponding to PID
@@ -41,6 +49,12 @@ pub struct TaskControlBlockInner {
     pub task_status: TaskStatus,
     /// It is set when active exit or execution error occurs
     pub exit_code: Option<i32>,
+    /// Stride scheduling priority (bigger => more CPU time)
+    pub priority: usize,
+    /// Current accumulated stride
+    pub stride: usize,
+    /// Amount to add to stride whenever task is scheduled
+    pub stride_pass: usize,
 }
 
 impl TaskControlBlockInner {
@@ -51,6 +65,16 @@ impl TaskControlBlockInner {
     #[allow(unused)]
     fn get_status(&self) -> TaskStatus {
         self.task_status
+    }
+    fn refresh_stride_pass(&mut self) {
+        self.stride_pass = stride_pass_from_priority(self.priority);
+    }
+    pub fn set_priority(&mut self, priority: usize) {
+        self.priority = priority;
+        self.refresh_stride_pass();
+    }
+    pub fn add_stride(&mut self) {
+        self.stride = self.stride.saturating_add(self.stride_pass);
     }
 }
 
@@ -75,10 +99,18 @@ impl TaskControlBlock {
                     task_cx: TaskContext::goto_trap_return(kstack_top),
                     task_status: TaskStatus::Ready,
                     exit_code: None,
+                    priority: DEFAULT_PRIORITY,
+                    stride: 0,
+                    stride_pass: stride_pass_from_priority(DEFAULT_PRIORITY),
                 })
             },
         }
     }
+}
+
+fn stride_pass_from_priority(priority: usize) -> usize {
+    let prio = cmp::max(priority, 1);
+    cmp::max(1, BIG_STRIDE / prio)
 }
 
 #[derive(Copy, Clone, PartialEq)]

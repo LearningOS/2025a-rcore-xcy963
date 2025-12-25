@@ -1,7 +1,8 @@
-use super::File;
+use super::{File, Stat, StatMode};
 use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
+use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bitflags::*;
@@ -47,6 +48,38 @@ impl OSInode {
         }
         v
     }
+}
+
+lazy_static! {//构造的文件的硬链接数量
+    static ref LINK_COUNTS: UPSafeCell<BTreeMap<u32, u32>> =
+        unsafe { UPSafeCell::new(BTreeMap::new()) };
+}
+
+fn init_nlink(inode_id: u32) {
+    let mut map = LINK_COUNTS.exclusive_access();
+    map.entry(inode_id).or_insert(1);
+}
+
+fn inc_nlink(inode_id: u32) -> u32 {
+    let mut map = LINK_COUNTS.exclusive_access();
+    let counter = map.entry(inode_id).or_insert(1);
+    *counter += 1;
+    *counter
+}
+
+fn dec_nlink(inode_id: u32) -> u32 {
+    let mut map = LINK_COUNTS.exclusive_access();
+    let counter = map.entry(inode_id).or_insert(1);
+    if *counter > 0 {
+        *counter -= 1;
+    }
+    *counter
+}
+
+pub fn get_nlink(inode_id: u32) -> u32 {
+    let mut map = LINK_COUNTS.exclusive_access();
+    let counter = map.entry(inode_id).or_insert(1);
+    *counter
 }
 
 lazy_static! {
@@ -103,18 +136,21 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
         if let Some(inode) = ROOT_INODE.find(name) {
             // clear size
             inode.clear();
+            init_nlink(inode.inode_id());
             Some(Arc::new(OSInode::new(readable, writable, inode)))
         } else {
             // create file
-            ROOT_INODE
-                .create(name)
-                .map(|inode| Arc::new(OSInode::new(readable, writable, inode)))
+            ROOT_INODE.create(name).map(|inode| {
+                init_nlink(inode.inode_id());
+                Arc::new(OSInode::new(readable, writable, inode))
+            })
         }
     } else {
         ROOT_INODE.find(name).map(|inode| {
             if flags.contains(OpenFlags::TRUNC) {
                 inode.clear();
             }
+            init_nlink(inode.inode_id());
             Arc::new(OSInode::new(readable, writable, inode))
         })
     }
@@ -157,4 +193,44 @@ impl File for OSInode {
         }
         total_write_size
     }
+    fn stat(&self, st: &mut Stat) -> isize {
+        let inode = {
+            let inner = self.inner.exclusive_access();
+            inner.inode.clone()
+        };
+        let inode_id = inode.inode_id();
+        st.dev = 0;
+        st.ino = inode_id as u64;
+        st.mode = if inode.is_dir() {
+            StatMode::DIR
+        } else {
+            StatMode::FILE
+        };
+        st.nlink = get_nlink(inode_id);
+        0
+    }
+}
+
+/// Create a hard link under root directory
+pub fn link_file(old: &str, new: &str) -> Option<()> {
+    if old == new {
+        return None;
+    }
+    let old_inode = ROOT_INODE.find(old)?;
+    if ROOT_INODE.find(new).is_some() {
+        return None;
+    }
+    let inode_id = old_inode.inode_id();
+    ROOT_INODE.link(new, inode_id)?;
+    inc_nlink(inode_id);
+    Some(())
+}
+
+/// Remove a directory entry under root directory
+pub fn unlink_file(name: &str) -> Option<()> {
+    let inode = ROOT_INODE.find(name)?;
+    let inode_id = inode.inode_id();
+    ROOT_INODE.unlink(name)?;
+    dec_nlink(inode_id);
+    Some(())
 }

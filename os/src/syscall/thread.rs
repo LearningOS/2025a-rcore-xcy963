@@ -18,8 +18,12 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
             .tid
     );
     let task = current_task().unwrap();
-    let process = task.process.upgrade().unwrap();//因为是一个weak的指针所以需要这样使用
-    // create a new thread
+    let (parent_priority, parent_stride) = {
+        let inner = task.inner_exclusive_access();
+        (inner.priority, inner.stride)
+    };
+    let process = task.process.upgrade().unwrap(); //因为是一个weak的指针所以需要这样使用
+                                                   // create a new thread
     let new_task = Arc::new(TaskControlBlock::new(
         Arc::clone(&process),
         task.inner_exclusive_access()
@@ -29,6 +33,11 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
             .ustack_base,
         true,
     ));
+    {
+        let mut new_inner = new_task.inner_exclusive_access();
+        new_inner.set_priority(parent_priority);
+        new_inner.stride = parent_stride;
+    }
     // add new task to scheduler
     add_task(Arc::clone(&new_task));
     let new_task_inner = new_task.inner_exclusive_access();
@@ -37,7 +46,8 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
     let mut process_inner = process.inner_exclusive_access();
     // add new thread to current process
     let tasks = &mut process_inner.tasks;
-    while tasks.len() < new_task_tid + 1 {//被分配了一个很大的,
+    while tasks.len() < new_task_tid + 1 {
+        //被分配了一个很大的,
         tasks.push(None);
     }
     tasks[new_task_tid] = Some(Arc::clone(&new_task));
@@ -49,7 +59,7 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
         new_task.kstack.get_top(),
         trap_handler as usize,
     );
-    (*new_task_trap_cx).x[10] = arg;//函数调用的参数
+    (*new_task_trap_cx).x[10] = arg; //函数调用的参数
     new_task_tid as isize
 }
 /// get current thread id syscall

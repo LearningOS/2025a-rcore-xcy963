@@ -49,7 +49,7 @@ pub fn sys_mutex_create(blocking: bool) -> isize {
         .find(|(_, item)| item.is_none())
         .map(|(id, _)| id)
     {
-        process_inner.mutex_list[id] = mutex;//保持之前设置mutex的代码
+        process_inner.mutex_list[id] = mutex; //保持之前设置mutex的代码
         if id >= process_inner.dl_mutex_res.len() {
             process_inner.dl_mutex_res.resize(id + 1, None);
         }
@@ -80,12 +80,11 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
         .res
         .as_ref()
         .unwrap()
-        .tid;//我们确定现在的进程是有效的,使用unwrap相当于是一种断言
+        .tid; //我们确定现在的进程是有效的,使用unwrap相当于是一种断言
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
 
-    let res_idx = process_inner.dl_mutex_res[mutex_id]
-        .unwrap();//获取我们对应的资源
+    let res_idx = process_inner.dl_mutex_res[mutex_id].unwrap(); //获取我们对应的资源
     let enabled = process_inner.deadlock_detect;
     if enabled && !process_inner.dl_try_request(tid, res_idx) {
         return -0xdead;
@@ -119,11 +118,11 @@ pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
         .tid;
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
-    if mutex_id >= process_inner.dl_mutex_res.len() {//资源不存在肯定是用户犯病了
-        return  -1;
+    if mutex_id >= process_inner.dl_mutex_res.len() {
+        //资源不存在肯定是用户犯病了
+        return -1;
     }
-    let res_idx = process_inner.dl_mutex_res[mutex_id]
-        .unwrap();
+    let res_idx = process_inner.dl_mutex_res[mutex_id].unwrap();
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
     drop(process_inner);
     drop(process);
@@ -196,8 +195,7 @@ pub fn sys_semaphore_up(sem_id: usize) -> isize {
     if sem_id >= process_inner.dl_sem_res.len() {
         process_inner.dl_sem_res.resize(sem_id + 1, None);
     }
-    let res_idx = process_inner.dl_sem_res[sem_id]
-        .unwrap_or_else(|| process_inner.add_resource(1));
+    let res_idx = process_inner.dl_sem_res[sem_id].unwrap_or_else(|| process_inner.add_resource(1));
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
     drop(process_inner);
     sem.up();
@@ -231,8 +229,7 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
     if sem_id >= process_inner.dl_sem_res.len() {
         process_inner.dl_sem_res.resize(sem_id + 1, None);
     }
-    let res_idx = process_inner.dl_sem_res[sem_id]
-        .unwrap_or_else(|| process_inner.add_resource(1));
+    let res_idx = process_inner.dl_sem_res[sem_id].unwrap_or_else(|| process_inner.add_resource(1));
     let enabled = process_inner.deadlock_detect;
     if enabled && !process_inner.dl_try_request(tid, res_idx) {
         return -0xdead;

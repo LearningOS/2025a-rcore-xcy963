@@ -3,14 +3,15 @@
 //! It is only used to manage processes and schedule process based on ready queue.
 //! Other CPU process monitoring functions are in Processor.
 
-use super::{ProcessControlBlock, TaskControlBlock, TaskStatus};
+use super::{ProcessControlBlock, TaskControlBlock, TaskStatus, BIG_STRIDE};
 use crate::sync::UPSafeCell;
-use alloc::collections::{BTreeMap, VecDeque};
+use alloc::collections::{BTreeMap, BinaryHeap};
 use alloc::sync::Arc;
+use core::cmp::Ordering;
 use lazy_static::*;
 ///A array of `TaskControlBlock` that is thread-safe
 pub struct TaskManager {
-    ready_queue: VecDeque<Arc<TaskControlBlock>>,
+    ready_queue: BinaryHeap<StrideEntry>,
 
     /// The stopping task, leave a reference so that the kernel stack will not be recycled when switching tasks
     /// 当主线程退出的时候,需要把task的指针保留一份ARC的在这里,不然rust会把他回收
@@ -22,27 +23,35 @@ impl TaskManager {
     ///Creat an empty TaskManager
     pub fn new() -> Self {
         Self {
-            ready_queue: VecDeque::new(),
+            ready_queue: BinaryHeap::new(),
             stop_task: None,
         }
     }
     /// Add process back to ready queue
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
-        self.ready_queue.push_back(task);
+        let entry = StrideEntry::new(task);
+        self.ready_queue.push(entry);
     }
     /// Take a process out of the ready queue
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        self.ready_queue.pop().map(|entry| {
+            let task = entry.task;
+            {
+                let mut inner = task.inner_exclusive_access();
+                inner.add_stride();
+            }
+            task
+        })
     }
     pub fn remove(&mut self, task: Arc<TaskControlBlock>) {
-        if let Some((id, _)) = self
-            .ready_queue
-            .iter()
-            .enumerate()
-            .find(|(_, t)| Arc::as_ptr(t) == Arc::as_ptr(&task))
-        {
-            self.ready_queue.remove(id);
+        let target_ptr = Arc::as_ptr(&task);
+        let mut new_heap = BinaryHeap::new();
+        while let Some(entry) = self.ready_queue.pop() {
+            if Arc::as_ptr(&entry.task) != target_ptr {
+                new_heap.push(entry);
+            }
         }
+        self.ready_queue = new_heap;
     }
     /// Add a task to stopping task
     pub fn add_stop(&mut self, task: Arc<TaskControlBlock>) {
@@ -87,6 +96,56 @@ pub fn remove_task(task: Arc<TaskControlBlock>) {
 pub fn fetch_task() -> Option<Arc<TaskControlBlock>> {
     //trace!("kernel: TaskManager::fetch_task");
     TASK_MANAGER.exclusive_access().fetch()
+}
+
+// A thin wrapper to keep the stride info in the scheduling heap.
+struct StrideEntry {
+    stride: usize,
+    id: usize,//由于要适配线程,所以task不维护id了,我们使用task的地址来管理等于的情况
+    task: Arc<TaskControlBlock>,
+}
+
+impl StrideEntry {
+    fn new(task: Arc<TaskControlBlock>) -> Self {
+        let stride = { task.inner_exclusive_access().stride };
+        let id = Arc::as_ptr(&task) as usize;
+        Self { stride, id, task }
+    }
+}
+
+impl PartialEq for StrideEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.stride == other.stride && self.id == other.id
+    }
+}
+
+impl Eq for StrideEntry {}
+
+impl PartialOrd for StrideEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let diff: isize = (self.stride as isize) - (other.stride as isize);
+        if diff == 0 {
+            return Some(self.id.cmp(&other.id));
+        }
+        let diff_abs = diff.unsigned_abs();
+        if diff_abs <= BIG_STRIDE / 2 {
+            if diff < 0 {
+                Some(Ordering::Greater)
+            } else {
+                Some(Ordering::Less)
+            }
+        } else if diff > 0 {
+            Some(Ordering::Greater)
+        } else {
+            Some(Ordering::Less)
+        }
+    }
+}
+
+impl Ord for StrideEntry {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap()
+    }
 }
 
 /// Set a task to stop-wait status, waiting for its kernel stack out of use.
